@@ -1,13 +1,13 @@
 import { useState, useRef, useCallback } from 'react';
-import { Upload, FileText, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
-import { uploadPdf, type UploadResponse } from '../api/pdf';
+import { Upload, FileText, Loader2, Clock, AlertCircle } from 'lucide-react';
+import { uploadPdf, type UploadAcceptedResponse } from '../api/pdf';
 
 interface UploadZoneProps {
-  onSuccess: (res: UploadResponse) => void;
+  onSuccess: (res: UploadAcceptedResponse) => void;
   onError: (msg: string) => void;
 }
 
-type State = 'idle' | 'drag' | 'uploading' | 'success' | 'error';
+type State = 'idle' | 'drag' | 'uploading' | 'queued' | 'error';
 
 export default function UploadZone({ onSuccess, onError }: UploadZoneProps) {
   const [state, setState] = useState<State>('idle');
@@ -29,9 +29,9 @@ export default function UploadZone({ onSuccess, onError }: UploadZoneProps) {
 
     try {
       const res = await uploadPdf(file);
-      setState('success');
+      setState('queued');
       onSuccess(res);
-      setTimeout(() => setState('idle'), 3000);
+      setTimeout(() => setState('idle'), 4000);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Erro desconhecido';
       setErrorMsg(msg);
@@ -57,7 +57,7 @@ export default function UploadZone({ onSuccess, onError }: UploadZoneProps) {
   const zoneBorder =
     state === 'drag'     ? 'border-violet-400 bg-violet-500/10 glow-violet' :
     state === 'uploading'? 'border-violet-500/60 animate-pulse-border' :
-    state === 'success'  ? 'border-emerald-500/60 bg-emerald-500/5' :
+    state === 'queued'   ? 'border-amber-500/60 bg-amber-500/5' :
     state === 'error'    ? 'border-red-500/50 bg-red-500/5' :
                            'border-white/10 hover:border-violet-500/40 hover:bg-white/[0.03]';
 
@@ -84,12 +84,8 @@ export default function UploadZone({ onSuccess, onError }: UploadZoneProps) {
             <Upload size={28} className="text-violet-400" />
           </div>
           <div className="text-center">
-            <p className="text-slate-200 font-medium text-sm">
-              Arraste um PDF aqui
-            </p>
-            <p className="text-slate-500 text-xs mt-1">
-              ou clique para selecionar
-            </p>
+            <p className="text-slate-200 font-medium text-sm">Arraste um PDF aqui</p>
+            <p className="text-slate-500 text-xs mt-1">ou clique para selecionar</p>
           </div>
           <span className="text-xs text-slate-600 border border-white/5 px-3 py-1 rounded-full">
             Máximo 50 MB
@@ -110,7 +106,7 @@ export default function UploadZone({ onSuccess, onError }: UploadZoneProps) {
         <>
           <Loader2 size={32} className="text-violet-400 animate-spin-slow" />
           <div className="text-center">
-            <p className="text-slate-200 font-medium text-sm">Enviando e indexando…</p>
+            <p className="text-slate-200 font-medium text-sm">Enviando arquivo…</p>
             <p className="text-slate-500 text-xs mt-1 max-w-[200px] truncate">{fileName}</p>
           </div>
           <div className="w-full max-w-[180px] h-1 rounded-full bg-white/5 overflow-hidden">
@@ -119,13 +115,13 @@ export default function UploadZone({ onSuccess, onError }: UploadZoneProps) {
         </>
       )}
 
-      {state === 'success' && (
+      {state === 'queued' && (
         <>
-          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
-            <CheckCircle2 size={28} className="text-emerald-400" />
+          <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20">
+            <Clock size={28} className="text-amber-400" />
           </div>
           <div className="text-center">
-            <p className="text-emerald-300 font-medium text-sm">Indexado com sucesso!</p>
+            <p className="text-amber-300 font-medium text-sm">Na fila de processamento</p>
             <p className="text-slate-500 text-xs mt-1 max-w-[200px] truncate">{fileName}</p>
           </div>
         </>

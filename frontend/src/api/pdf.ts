@@ -1,9 +1,16 @@
-export interface UploadResponse {
-  id: string;
+export interface UploadAcceptedResponse {
+  jobId: string;
   fileName: string;
-  path: string;
+  status: 'processing';
+}
+
+export interface PdfFile {
+  jobId: string;
+  fileName: string;
+  status: 'processing' | 'completed' | 'failed';
   uploadedAt: string;
-  extractedCharacters: number;
+  extractedCharacters?: number;
+  error?: string;
 }
 
 export interface SearchResult {
@@ -14,7 +21,7 @@ export interface SearchResult {
 
 const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '';
 
-export async function uploadPdf(file: File): Promise<UploadResponse> {
+export async function uploadPdf(file: File): Promise<UploadAcceptedResponse> {
   const body = new FormData();
   body.append('file', file);
 
@@ -25,7 +32,7 @@ export async function uploadPdf(file: File): Promise<UploadResponse> {
     throw new Error(data.error ?? `Upload falhou (${res.status})`);
   }
 
-  return res.json() as Promise<UploadResponse>;
+  return res.json() as Promise<UploadAcceptedResponse>;
 }
 
 export async function searchPdfs(term: string): Promise<SearchResult[]> {

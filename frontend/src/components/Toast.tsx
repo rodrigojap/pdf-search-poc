@@ -1,9 +1,9 @@
-import { CheckCircle2, XCircle, X } from 'lucide-react';
+import { CheckCircle2, XCircle, X, Loader2 } from 'lucide-react';
 
 export interface ToastItem {
   id: string;
   message: string;
-  type: 'success' | 'error';
+  type: 'success' | 'error' | 'info';
 }
 
 interface ToastProps {
@@ -24,11 +24,9 @@ export default function Toast({ toasts, onRemove }: ToastProps) {
                      backdrop-blur-2xl
                      bg-slate-900/90 border-white/10"
         >
-          {toast.type === 'success' ? (
-            <CheckCircle2 size={18} className="text-emerald-400 mt-0.5 shrink-0" />
-          ) : (
-            <XCircle size={18} className="text-red-400 mt-0.5 shrink-0" />
-          )}
+          {toast.type === 'success' && <CheckCircle2 size={18} className="text-emerald-400 mt-0.5 shrink-0" />}
+          {toast.type === 'error'   && <XCircle      size={18} className="text-red-400 mt-0.5 shrink-0" />}
+          {toast.type === 'info'    && <Loader2      size={18} className="text-violet-400 mt-0.5 shrink-0 animate-spin" />}
           <p className="text-sm text-slate-200 flex-1 leading-snug">{toast.message}</p>
           <button
             onClick={() => onRemove(toast.id)}

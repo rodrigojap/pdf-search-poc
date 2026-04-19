@@ -4,12 +4,13 @@ import UploadZone from './components/UploadZone';
 import UploadedList from './components/UploadedList';
 import SearchPanel from './components/SearchPanel';
 import Toast, { type ToastItem } from './components/Toast';
-import type { UploadResponse } from './api/pdf';
+import type { UploadAcceptedResponse, PdfFile } from './api/pdf';
+import { usePdfHub, type PdfProcessedEvent } from './hooks/usePdfHub';
 
 type Tab = 'upload' | 'search';
 
 export default function App() {
-  const [uploadedFiles, setUploadedFiles] = useState<UploadResponse[]>([]);
+  const [files, setFiles] = useState<PdfFile[]>([]);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>('upload');
 
@@ -23,10 +24,40 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const handleUploadSuccess = useCallback((res: UploadResponse) => {
-    setUploadedFiles((prev) => [res, ...prev]);
-    addToast(`"${res.fileName}" indexado — ${res.extractedCharacters.toLocaleString()} chars extraídos`, 'success');
+  const handleUploadSuccess = useCallback((res: UploadAcceptedResponse) => {
+    const newFile: PdfFile = {
+      jobId: res.jobId,
+      fileName: res.fileName,
+      status: 'processing',
+      uploadedAt: new Date().toISOString(),
+    };
+    setFiles((prev) => [newFile, ...prev]);
+    addToast(`"${res.fileName}" enviado — aguardando processamento…`, 'info');
   }, [addToast]);
+
+  const handlePdfProcessed = useCallback((event: PdfProcessedEvent) => {
+    setFiles((prev) =>
+      prev.map((f) =>
+        f.jobId !== event.jobId ? f : {
+          ...f,
+          status: event.status,
+          extractedCharacters: event.extractedCharacters,
+          error: event.error,
+        }
+      )
+    );
+
+    if (event.status === 'completed') {
+      addToast(
+        `"${event.fileName}" indexado — ${event.extractedCharacters.toLocaleString()} chars extraídos`,
+        'success'
+      );
+    } else {
+      addToast(`Falha ao processar "${event.fileName}"`, 'error');
+    }
+  }, [addToast]);
+
+  usePdfHub(handlePdfProcessed);
 
   const handleError = useCallback((msg: string) => {
     addToast(msg, 'error');
@@ -58,7 +89,7 @@ export default function App() {
             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
             <span className="hidden sm:inline">Elasticsearch</span>
             <Zap size={12} className="text-slate-600" />
-            <span className="hidden sm:inline text-slate-600">PdfPig</span>
+            <span className="hidden sm:inline text-slate-600">RabbitMQ</span>
           </div>
         </div>
       </header>
@@ -76,9 +107,9 @@ export default function App() {
           >
             {tab === 'upload' ? <Upload size={14} /> : <Search size={14} />}
             {tab === 'upload' ? 'Upload' : 'Buscar'}
-            {tab === 'upload' && uploadedFiles.length > 0 && (
+            {tab === 'upload' && files.length > 0 && (
               <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-violet-500/20 text-violet-400">
-                {uploadedFiles.length}
+                {files.length}
               </span>
             )}
           </button>
@@ -88,14 +119,7 @@ export default function App() {
       {/* Main content */}
       <main className="relative z-10 flex-1 max-w-6xl w-full mx-auto px-4 sm:px-5 py-6 sm:py-8">
         <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-5 h-full">
-          {/* LEFT — upload column */}
-          <LeftColumn
-            uploadedFiles={uploadedFiles}
-            onSuccess={handleUploadSuccess}
-            onError={handleError}
-          />
-
-          {/* RIGHT — search column */}
+          <LeftColumn files={files} onSuccess={handleUploadSuccess} onError={handleError} />
           <div className="glass flex flex-col p-5 gap-5 min-h-[600px]">
             <SectionHeader icon={<Search size={15} />} title="Busca Textual" />
             <div className="flex-1 overflow-hidden">
@@ -104,14 +128,9 @@ export default function App() {
           </div>
         </div>
 
-        {/* Mobile: conditional render */}
         <div className="sm:hidden">
           {activeTab === 'upload' ? (
-            <LeftColumn
-              uploadedFiles={uploadedFiles}
-              onSuccess={handleUploadSuccess}
-              onError={handleError}
-            />
+            <LeftColumn files={files} onSuccess={handleUploadSuccess} onError={handleError} />
           ) : (
             <div className="glass flex flex-col p-5 gap-5 min-h-[500px]">
               <SectionHeader icon={<Search size={15} />} title="Busca Textual" />
@@ -123,9 +142,8 @@ export default function App() {
         </div>
       </main>
 
-      {/* Footer */}
       <footer className="relative z-10 border-t border-white/[0.04] py-4 text-center text-[11px] text-slate-700">
-        .NET 8 · Elasticsearch 8 · PdfPig · Docker
+        .NET 8 · Elasticsearch 8 · RabbitMQ · SignalR · Docker
       </footer>
 
       <Toast toasts={toasts} onRemove={removeToast} />
@@ -134,12 +152,12 @@ export default function App() {
 }
 
 function LeftColumn({
-  uploadedFiles,
+  files,
   onSuccess,
   onError,
 }: {
-  uploadedFiles: UploadResponse[];
-  onSuccess: (r: UploadResponse) => void;
+  files: PdfFile[];
+  onSuccess: (r: UploadAcceptedResponse) => void;
   onError: (m: string) => void;
 }) {
   return (
@@ -147,10 +165,10 @@ function LeftColumn({
       <SectionHeader
         icon={<Upload size={15} />}
         title="Upload de PDF"
-        badge={uploadedFiles.length > 0 ? String(uploadedFiles.length) : undefined}
+        badge={files.length > 0 ? String(files.length) : undefined}
       />
       <UploadZone onSuccess={onSuccess} onError={onError} />
-      <UploadedList files={uploadedFiles} />
+      <UploadedList files={files} />
     </div>
   );
 }

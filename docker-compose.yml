@@ -30,6 +30,27 @@ services:
     depends_on:
       elasticsearch:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - pdfsearch-net
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: pdfsearch-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     networks:
       - pdfsearch-net
     restart: unless-stopped

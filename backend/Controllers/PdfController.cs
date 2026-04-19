@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using PdfSearch.Api.Models;
 using PdfSearch.Api.Services;
+using PdfSearch.Api.Services.Messaging;
 using PdfSearch.Api.Services.Storage;
 
 namespace PdfSearch.Api.Controllers;
@@ -11,29 +12,29 @@ namespace PdfSearch.Api.Controllers;
 public class PdfController : ControllerBase
 {
     private readonly IFileStorageService _storage;
-    private readonly PdfTextExtractorService _extractor;
+    private readonly IRabbitMqPublisher _publisher;
     private readonly ElasticsearchIndexService _indexService;
     private readonly ILogger<PdfController> _logger;
 
     public PdfController(
         IFileStorageService storage,
-        PdfTextExtractorService extractor,
+        IRabbitMqPublisher publisher,
         ElasticsearchIndexService indexService,
         ILogger<PdfController> logger)
     {
-        _storage = storage;
-        _extractor = extractor;
+        _storage      = storage;
+        _publisher    = publisher;
         _indexService = indexService;
-        _logger = logger;
+        _logger       = logger;
     }
 
     /// <summary>
-    /// Upload a PDF, extract its text and index in Elasticsearch.
+    /// Saves the PDF and enqueues it for async processing. Returns 202 immediately.
     /// </summary>
     [HttpPost("upload")]
-    [RequestSizeLimit(50 * 1024 * 1024)] // 50 MB
+    [RequestSizeLimit(50 * 1024 * 1024)]
     [Consumes("multipart/form-data")]
-    [ProducesResponseType(typeof(UploadResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(UploadAcceptedResponse), StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Upload(IFormFile file)
     {
@@ -45,37 +46,22 @@ public class PdfController : ControllerBase
 
         try
         {
+            var jobId       = Guid.NewGuid().ToString();
             var storagePath = await _storage.SaveAsync(file);
 
-            string content;
-            await using (var stream = await _storage.GetAsync(storagePath))
-            {
-                content = _extractor.Extract(stream);
-            }
+            await _publisher.PublishAsync(new PdfUploadMessage(jobId, storagePath, file.FileName));
 
-            var document = new PdfDocument
+            return Accepted(new UploadAcceptedResponse
             {
+                JobId    = jobId,
                 FileName = file.FileName,
-                Path = storagePath,
-                Content = content,
-                UploadedAt = DateTime.UtcNow
-            };
-
-            await _indexService.IndexDocumentAsync(document);
-
-            return Ok(new UploadResponse
-            {
-                Id = document.Id,
-                FileName = document.FileName,
-                Path = document.Path,
-                UploadedAt = document.UploadedAt,
-                ExtractedCharacters = content.Length
+                Status   = "processing",
             });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing upload for file {FileName}", file.FileName);
-            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Error processing file." });
+            _logger.LogError(ex, "Error queuing upload for {FileName}", file.FileName);
+            return StatusCode(500, new { error = "Error queuing file." });
         }
     }
 
@@ -97,8 +83,8 @@ public class PdfController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Search error for term '{Term}'", term);
-            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Error performing search." });
+            _logger.LogError(ex, "Search error for '{Term}'", term);
+            return StatusCode(500, new { error = "Error performing search." });
         }
     }
 }
