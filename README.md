@@ -1,6 +1,8 @@
 # PDF Search POC
 
-Busca textual em PDFs com **.NET 8 + Elasticsearch 8 + Kibana + Docker Compose**.
+Busca textual em PDFs com **.NET 8 + Elasticsearch 8 + Kibana + RabbitMQ + SignalR + React (Vite) + Docker Compose**.
+
+O fluxo de upload é **assíncrono**: a API grava o arquivo, publica uma mensagem na fila e responde **202 Accepted** com um `jobId`. Um worker consome a fila, extrai o texto (PdfPig), indexa no Elasticsearch e notifica o frontend via **SignalR** quando o processamento termina.
 
 ## Estrutura
 
@@ -8,24 +10,27 @@ Busca textual em PDFs com **.NET 8 + Elasticsearch 8 + Kibana + Docker Compose**
 pdf-search-poc/
 ├── docker-compose.yml
 ├── storage/
-│   └── pdfs/                          ← PDFs persistidos no host
-└── src/
-    └── PdfSearch.Api/
-        ├── Dockerfile
-        ├── PdfSearch.Api.csproj
-        ├── Program.cs
-        ├── appsettings.json
-        ├── Controllers/
-        │   └── PdfController.cs
-        ├── Models/
-        │   ├── PdfDocument.cs
-        │   └── SearchResult.cs
-        └── Services/
-            ├── Storage/
-            │   ├── IFileStorageService.cs     ← contrato de storage
-            │   └── LocalFileStorageService.cs ← impl. local
-            ├── PdfTextExtractorService.cs     ← PdfPig
-            └── ElasticsearchIndexService.cs   ← indexação e busca
+│   └── pdfs/                    ← PDFs persistidos no host (montado em /app/storage na API)
+├── backend/                     ← PdfSearch.Api (.NET 8)
+│   ├── Dockerfile
+│   ├── PdfSearch.Api.csproj
+│   ├── Program.cs
+│   ├── appsettings.json
+│   ├── Controllers/
+│   │   └── PdfController.cs
+│   ├── Hubs/
+│   │   └── PdfHub.cs
+│   ├── Models/
+│   ├── Services/
+│   │   ├── Storage/             ← IFileStorageService / LocalFileStorageService
+│   │   ├── Messaging/           ← RabbitMQ publisher
+│   │   ├── PdfTextExtractorService.cs
+│   │   └── ElasticsearchIndexService.cs
+│   └── Workers/
+│       └── PdfProcessingWorker.cs
+└── frontend/                    ← React + Vite + TypeScript
+    ├── Dockerfile
+    └── src/
 ```
 
 ---
@@ -33,7 +38,7 @@ pdf-search-poc/
 ## Pré-requisitos
 
 - Docker + Docker Compose
-- (Opcional para dev local) .NET 8 SDK
+- (Opcional) .NET 8 SDK e Node.js 20+ para desenvolvimento local da API e do frontend
 
 ---
 
@@ -46,13 +51,18 @@ cd pdf-search-poc
 docker compose up --build
 ```
 
-Aguarde os 3 serviços ficarem saudáveis (≈ 30–60s na primeira vez).
+Aguarde os serviços dependentes de healthcheck ficarem prontos (primeira execução pode levar 1–2 minutos).
 
-| Serviço       | URL                          |
-|---------------|------------------------------|
-| API (Swagger) | http://localhost:5000/swagger |
-| Elasticsearch | http://localhost:9200         |
-| Kibana        | http://localhost:5601         |
+| Serviço | URL / porta |
+|--------|-------------|
+| **Frontend (UI)** | http://localhost:3000 |
+| **API (Swagger)** | http://localhost:5000/swagger |
+| **Elasticsearch** | http://localhost:9200 |
+| **Kibana** | http://localhost:5601 |
+| **RabbitMQ (AMQP)** | `localhost:5672` |
+| **RabbitMQ Management UI** | http://localhost:15672 (usuário/senha: `guest` / `guest`) |
+
+A API escuta **8080** dentro do container; o host mapeia **5000 → 8080**.
 
 ### 2. Parar
 
@@ -60,7 +70,7 @@ Aguarde os 3 serviços ficarem saudáveis (≈ 30–60s na primeira vez).
 docker compose down
 ```
 
-Para apagar também os dados do Elasticsearch:
+Para apagar também o volume de dados do Elasticsearch:
 
 ```bash
 docker compose down -v
@@ -68,7 +78,7 @@ docker compose down -v
 
 ---
 
-## Testar via Postman
+## Testar a API (Postman ou curl)
 
 ### Upload de PDF
 
@@ -79,16 +89,17 @@ Body: form-data
   Value: <selecione um .pdf>
 ```
 
-Resposta esperada:
+Resposta **202 Accepted** (processamento em fila):
+
 ```json
 {
-  "id": "abc123",
+  "jobId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "fileName": "contrato.pdf",
-  "path": "/app/storage/abc123_contrato.pdf",
-  "uploadedAt": "2024-01-15T10:30:00Z",
-  "extractedCharacters": 4521
+  "status": "processing"
 }
 ```
+
+O texto só aparece no Elasticsearch depois que o **PdfProcessingWorker** processar a mensagem. O frontend usa **SignalR** (`/hubs/pdf`, evento `PdfProcessed`) para atualizar o status quando a indexação concluir ou falhar.
 
 ### Busca textual
 
@@ -97,12 +108,13 @@ GET http://localhost:5000/api/pdf/search?term=cláusula
 ```
 
 Resposta esperada:
+
 ```json
 [
   {
     "fileName": "contrato.pdf",
-    "path": "/app/storage/abc123_contrato.pdf",
-    "content": "...a <em>cláusula</em> 5ª estabelece que..."
+    "path": "/app/storage/..._contrato.pdf",
+    "content": "...a <em>cláusula</em>..."
   }
 ]
 ```
@@ -111,13 +123,10 @@ Resposta esperada:
 
 ## Validar no Kibana
 
-1. Acesse http://localhost:5601
-2. Vá em **Management → Stack Management → Index Management**
-   - Você verá o índice `pdfs`
-3. Vá em **Analytics → Discover**
-   - Crie um Data View apontando para `pdfs`
-   - Explore os documentos indexados
-4. Para query manual, vá em **Dev Tools** e execute:
+1. Acesse http://localhost:5601  
+2. **Management → Stack Management → Index Management** — índice `pdfs`  
+3. **Analytics → Discover** — crie um Data View para `pdfs`  
+4. Em **Dev Tools**, exemplo:
 
 ```
 GET pdfs/_search
@@ -132,34 +141,48 @@ GET pdfs/_search
 
 ---
 
-## Trocar o Storage (local → cloud)
+## Trocar o storage (local → cloud)
 
-O contrato `IFileStorageService` isola completamente a implementação de storage.
+O contrato `IFileStorageService` isola a implementação de armazenamento.
 
-Para migrar para S3, basta:
+1. Implemente `S3FileStorageService : IFileStorageService` (ou Azure Blob, MinIO, etc.).  
+2. Em `Program.cs`, troque o registro:
 
-1. Criar `S3FileStorageService : IFileStorageService`
-2. Em `Program.cs`, substituir:
-   ```csharp
-   // antes
-   builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>();
-   // depois
-   builder.Services.AddSingleton<IFileStorageService, S3FileStorageService>();
-   ```
-
-O mesmo vale para Azure Blob ou MinIO.
+```csharp
+builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>();
+// →
+builder.Services.AddSingleton<IFileStorageService, S3FileStorageService>();
+```
 
 ---
 
-## Desenvolvimento local (sem Docker)
+## Desenvolvimento local (sem empacotar tudo em Docker)
+
+1. Suba a infraestrutura (Elasticsearch, Kibana e RabbitMQ). O `appsettings.Development.json` usa `RabbitMq:Host` = `localhost` para falar com o broker exposto pelo Compose:
 
 ```bash
-# 1. Suba apenas o Elasticsearch e Kibana
-docker compose up elasticsearch kibana
+docker compose up elasticsearch kibana rabbitmq
+```
 
-# 2. Rode a API localmente
-cd src/PdfSearch.Api
+2. API (na pasta `backend`):
+
+```bash
+cd backend
 dotnet run
 ```
 
-A API estará em http://localhost:5000.
+Por padrão a API usa `http://localhost:5000` (perfil Development). Variáveis no formato `Elasticsearch__Uri`, `RabbitMq__Host`, etc., sobrescrevem o `appsettings`.
+
+3. Frontend (na pasta `frontend`):
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+O Vite usa a porta **3000** e faz proxy de `/api` e `/hubs` para `http://localhost:5000` (ver `vite.config.ts`), alinhado ao CORS da API (`http://localhost:3000`).
+
+---
+
+Documentação em inglês: [README.en.md](README.en.md).
