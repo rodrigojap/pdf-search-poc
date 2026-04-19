@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #07070f;
+    color: #f1f5f9;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.18);
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/[0.04] backdrop-blur-2xl border border-white/[0.07] rounded-2xl;
+  }
+
+  .glass-sm {
+    @apply bg-white/[0.04] backdrop-blur-xl border border-white/[0.07] rounded-xl;
+  }
+
+  .btn-primary {
+    @apply flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm
+           bg-gradient-to-r from-violet-600 to-indigo-600
+           hover:from-violet-500 hover:to-indigo-500
+           disabled:opacity-40 disabled:cursor-not-allowed
+           transition-all duration-200 shadow-lg shadow-violet-900/30;
+  }
+
+  .input-field {
+    @apply w-full bg-white/[0.05] border border-white/10 rounded-xl px-4 py-3 text-slate-100
+           placeholder-slate-500 text-sm outline-none
+           focus:border-violet-500/60 focus:bg-white/[0.07]
+           transition-all duration-200;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    background: linear-gradient(135deg, #a78bfa 0%, #60a5fa 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .glow-violet {
+    box-shadow: 0 0 30px rgba(139, 92, 246, 0.15), 0 0 60px rgba(139, 92, 246, 0.05);
+  }
+}
+
+/* Highlights from Elasticsearch */
+em {
+  font-style: normal;
+  background: rgba(167, 139, 250, 0.2);
+  color: #c4b5fd;
+  padding: 1px 3px;
+  border-radius: 3px;
+  font-weight: 500;
+}
